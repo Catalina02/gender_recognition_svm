@@ -29,6 +29,8 @@ from sklearn.model_selection import train_test_split
 from sklearn.model_selection import KFold
 from sklearn.metrics import accuracy_score,precision_score,recall_score,confusion_matrix,roc_curve,roc_auc_score
 from sklearn.model_selection import GridSearchCV
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import roc_curve, auc
 
 #preprocess.
 from sklearn.preprocessing import MinMaxScaler,StandardScaler,LabelEncoder,OneHotEncoder
@@ -60,6 +62,8 @@ def Eliminar_Columnas():
     df.drop('sp.ent',axis=1,inplace=True)
     df.drop('meanfreq',axis=1,inplace=True)
     df.drop('median',axis=1,inplace=True)
+    df.drop('sd',axis=1,inplace=True)
+    df.drop('IQR',axis=1,inplace=True)
 
 #Caracteristicas segun Genero
 def Car_Genero(feature):
@@ -69,7 +73,13 @@ def Car_Genero(feature):
     fig.set_size_inches(7,7)
     fig.savefig(feature.upper()+'caract-gen') #guardar graficos 
 
-             
+def calcular_limites(feature): 
+    q1,q3=df[feature].quantile([0.25,0.75])  #q1->primercuartil->Q25; q3->tercercuartil->Q75
+    iqr=q3-q1#rango intercuartil=iferencia entre el tercer y el primer cuartil, Mediante esta medida se eliminan los valores extremadamente alejados.
+    #En una distribución, encontramos la mitad de los datos, el 50 %, ubicados dentro del rango intercuartílico. 
+    rang=1.5*iqr
+    #Q25-RANG= Limite Inferior; Q75+RANG=Limite Superior
+    return(q1-rang,q3+rang)             
 
 def Normalizar():
         temp_df=df
@@ -80,7 +90,7 @@ def Normalizar():
         x_train,x_test,y_train,y_test=train_test_split(X,Y,test_size=0.20,random_state=42) 
         #test_size=proporción del conjunto de datos para incluir en la división de prueba. 
         #random_state=Controla la mezcla aplicada a los datos antes de aplicar la división. Pase un int para una salida reproducible a través de múltiples llamadas a funciones 
-        return x_train,x_test,y_train,y_test
+        return x_train,x_test,y_train,y_test,scaler
 
 def Modelado(modelo):
         Normalizar()
@@ -124,25 +134,90 @@ def record_audio():
 
 
 def Obtener_Valores_Voz():
-        record_audio()
+        
         os.system('"Praat.exe" --run extract_freq_info.praat')
         file = open('output.txt','r') 
         values = file.readline()
         values = values.split(', ')
-        values=values[0:4]
-        for x in range(0,4):
+        values=values[0:2]
+        for x in range(0,2):
                 values[x] = float(values[x])/1000
         values=np.array(values)
         valores_voz=[values]
         return valores_voz
 
 #************   MAIN   ******************
+
+
+for col in (df.columns):
+    if (col != 'label'):
+        lower,upper=calcular_limites(col)
+        df = df[(df[col] >lower) & (df[col]<upper)]     
+
 Eliminar_Columnas()
 
-x_train,x_test,y_train,y_test=Normalizar()
-clf=Modelado(SVC(kernel='rbf'))
+x_train,x_test,y_train,y_test,scaler=Normalizar()
+clf=Modelado(SVC(kernel='rbf', C=1,gamma=0.1))
 
+#record_audio()
 voz=Obtener_Valores_Voz()
-clf.predict(voz)
+clf.predict(scaler.transform(voz))
 
 
+
+'''TESTEOS'''
+
+dict = {'label':{'male':0,'female':1}}      # label = column name
+df.replace(dict,inplace = True)           # replace = str to numerical
+x = df.loc[:, df.columns != 'label']
+y = df.loc[:,'label']
+
+X_train,X_test,Y_train,Y_test,Scaler=x_train,x_test,y_train,y_test,scaler
+
+
+classifier = SVC(kernel='rbf', C=1,gamma=0.1, probability=True)
+classifier.fit(X_train, Y_train)
+
+def GraficosModelo(X_train,X_test,Y_train,Y_test,classifier):
+    fig = plt.figure(figsize=(9, 8))
+
+    ax = fig.add_subplot(2, 2, 1)
+    Y_pred = classifier.predict(X_test)
+    clr=np.asarray(['b','g'])
+    ax.scatter(X_test[Y_test==0, 0], X_test[Y_test==0, 1], c=clr[Y_pred[Y_test==0]], 
+            marker='x', cmap=plt.cm.RdBu, vmin=0, vmax=1,
+            linewidth=1, alpha=0.5, s=40, label='Clase 1')
+    ax.scatter(X_test[Y_test==1, 0], X_test[Y_test==1, 1], c=clr[Y_pred[Y_test==1]], 
+            marker='o', cmap=plt.cm.RdBu, vmin=0, vmax=1, 
+            linewidth=0, alpha=0.5, s=40, label='Clase 2')
+    plt.title('Clasificaci\'on en el conjunto de test')
+
+    ax = fig.add_subplot(2, 2, 2)
+    Y_pred = classifier.predict_proba(X_test)
+    fpr, tpr, th = roc_curve(Y_test, Y_pred[:, 1])
+    ax.plot(fpr, tpr, linewidth=4, alpha=0.5, label='Test')
+    print("Area bajo la curva ROC (test): %f" %(auc(fpr, tpr)))
+    fpr, tpr, th = roc_curve(Y_train, classifier.predict_proba(X_train)[:, 1])
+    ax.plot(fpr, tpr, linewidth=4, alpha=0.5, label='Train')
+    print("Area bajo la curva ROC (train): %f" %(auc(fpr, tpr)))
+    plt.legend(loc=4)
+    ax.set_xlabel('False Positive Rate')
+    ax.set_ylabel('True Positive Rate')
+    ax.set_title('curva ROC')
+    plt.grid()
+
+    ax = fig.add_subplot(2, 2, 4)
+    ax.scatter(X_train[Y_train==0, 0], X_train[Y_train==0, 1], c='b', 
+            marker='x', linewidth=1, alpha=0.5, s=20, label='Clase 1')
+    ax.scatter(X_train[Y_train==1, 0], X_train[Y_train==1, 1], c='g', 
+            marker='o', linewidth=0, alpha=0.5, s=20, label='Clase 2')
+    ax.scatter(X_train[classifier.support_, 0], X_train[classifier.support_, 1], 
+            c='r', linewidth=1, alpha=0.25, s=100)
+    plt.title('Vectores de soporte')
+
+    plt.tight_layout()
+    print("%d SVs para la clase 1" % (classifier.n_support_[0]))
+    print("%d SVs para la clase 2" % (classifier.n_support_[1]))
+    
+    
+GraficosModelo(x_train,x_test,y_train,y_test,classifier)
