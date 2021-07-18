@@ -159,13 +159,13 @@ Eliminar_Columnas()
 x_train,x_test,y_train,y_test,scaler=Normalizar()
 clf=Modelado(SVC(kernel='rbf', C=1,gamma=0.1))
 
-#record_audio()
+record_audio()
 voz=Obtener_Valores_Voz()
 clf.predict(scaler.transform(voz))
 
 
 
-'''TESTEOS'''
+'''TESTEOS
 
 dict = {'label':{'male':0,'female':1}}      # label = column name
 df.replace(dict,inplace = True)           # replace = str to numerical
@@ -221,3 +221,4 @@ def GraficosModelo(X_train,X_test,Y_train,Y_test,classifier):
     
     
 GraficosModelo(x_train,x_test,y_train,y_test,classifier)
+'''
